@@ -1,157 +1,147 @@
-// ПОИСК БЛИЖАЙШИХ СОСЕДЕЙ
-/* Условие:
- Дано множество точек в многомерном пространстве.
- В каждом запросе задается точка, Вам необходимо вывести номер
- ближайшей к ней точки из исходного множества в смысле простого евклидова расстояния.
-
- Если ближайших точек несколько, то выведите номер любой из них.
- Читать сразу все запросы и обрабатывать их одновременно запрещено.
-
- * Формат ввода:
- В первой строке задано два числа 1 <= n <= 10^5 и 1 <= d <= 10 - количество точек в множестве и размерность пространства.
- Каждая из следующих n строк содержит d целых чисел x[i][j] - j-я координата i-й точки, |x[i][j]| <= 10^8.
-
- Далее следует целое число 1 <= q <= 10^6 - количество запросов
- Каждая из следующих q строк содержит d целых чисел y[i][j] - j-я координата i-й точки, |y[i][j]| <= 10^8.
-
- * Формат вывода:
- Для каждого запроса выведите в отдельной строке единственное число — индекс ближайшей точки из множества.
- Если таких несколько, выведите любую.
- Индексация точек множества начинается с 1. <- !!!!!!!!!!
-
- Max:
- x[i][j] - y[i][j] = 2 * 10^8
- (x[i][j] - y[i][j])^2 = 4 * 10^16
- sqrt((x[i][j] - y[i][j])^2) = 2 * 10^8
- */
-
-/*
-// Быстрое возведение в степень для целых чисел и положительной степени
-int bin_pow(int num, int pow) {
-    int result;
-    if (pow == 1) {
-            return num;
-    }
-    if (pow == 0) {
-        return 1;
-    }
-
-    if (pow % 2 == 0) {
-        result = bin_pow(num, pow / 2);
-        return result * result;
-    }
-    else {
-        result = bin_pow(num, (pow - 1) / 2);
-        return num * result * result;
-    }
-}
-*/
-
 #include <iostream>
-#include <vector>
-#include <climits>
+#include <array>
 #include <algorithm>
+#include <climits>
+#include <memory>
 
-// k-мерное дерево
-struct KDNode {
-    std::vector<int> coord;
+#pragma GCC optimize("O3")
+
+const int MAX_D = 10;
+const int MAX_N = 100000;
+
+struct point {
+    std::array<int, MAX_D> coord{};
     int index;
-    KDNode* left;
-    KDNode* right;
 
-    KDNode(const std::vector<int>& point, int idx) {
-        coord = point;
-        index = idx;
-        left = nullptr;
-        right = nullptr;
+    point() = default;
+
+    point(const std::array<int, MAX_D>& coords, int idx) : coord(coords), index(idx) {}
+};
+
+struct Comparator {
+    int axis;
+    explicit Comparator(int ax) : axis(ax) {}
+
+    bool operator()(const point& a, const point& b) const {
+        return a.coord[axis] < b.coord[axis];
     }
 };
 
 class KDTree {
+public:
+    struct KDNode {
+        point dot;
+        std::unique_ptr<KDNode> left = nullptr;
+        std::unique_ptr<KDNode> right = nullptr;
+
+        KDNode(const std::array<int, MAX_D>& coords, int idx) : dot(coords, idx) {}
+    };
 private:
-    KDNode* root;
+    using NodePtr = std::unique_ptr<KDNode>;
 
-    KDNode* build(std::vector<std::pair<std::vector<int>, int>>& coords, int depth, int left, int right, int dim) {
-        if (left >= right) {
-            return nullptr;
+    NodePtr root = nullptr;
+    int dim;
+
+    void recursive_insert(NodePtr& node, const std::array<int, MAX_D>& coords, int index, int depth) {
+        const int axis = depth % dim;
+        if (coords[axis] <= node->dot.coord[axis]) {
+            if (node->left == nullptr) {
+                node->left = std::make_unique<KDNode>(coords, index);
+            } else {
+                recursive_insert(node->left, coords, index, depth + 1);
+            }
+        } else {
+            if (node->right == nullptr) {
+                node->right = std::make_unique<KDNode>(coords, index);
+            } else {
+                recursive_insert(node->right, coords, index, depth + 1);
+            }
         }
-        int axis = depth % dim;
-        int mid = (left + right) / 2;
-
-        auto comparator = [axis](const std::pair<std::vector<int>, int>& a, const std::pair<std::vector<int>, int>& b) {
-            return a.first[axis] < b.first[axis];
-        };
-
-        // Сортировка подмассива по текущей оси
-        std::nth_element(coords.begin() + left,
-                         coords.begin() + mid,
-                         coords.begin() + right,
-                         comparator);
-
-        KDNode* node = new KDNode(coords[mid].first, coords[mid].second);
-        node->left = build(coords, depth + 1, left, mid, dim);
-        node->right = build(coords, depth + 1, mid + 1, right, dim);
-
-        return node;
     }
 
-    // Квадрат Евклидова расстояния
-    long long euc_d2(const std::vector<int>& x, const std::vector<int>& y, int dim) {
-        long long sum = 0;
-        for (int i = 0; i < dim; ++i) {
+    bool euc_d2(const std::array<int, MAX_D>& x, const std::array<int, MAX_D>& y, long long& min_d) {
+        long long result = 0;
+        for (int i = 0; i < dim; i++) {
             long long tmp = x[i] - y[i];
-            sum += tmp * tmp;
+            result += tmp * tmp;
+            if (result >= min_d) {
+                return false;
+            }
         }
-        return sum;
+        min_d = result;
+        return true;
     }
 
-    void find_nearest(KDNode* node, const std::vector<int>& query, int depth, long long& min_d, int& index, int dim) {
-        if (!node) {
-            return;
-        }
-        long long d = euc_d2(query, node->coord, dim);
-        if (d < min_d) {
-            min_d = d;
-            index = node->index;
+    void find_nearest(NodePtr& node, const std::array<int, MAX_D>& query, int depth, long long& min_d, int& best_ind) {
+        const int axis = depth % dim;
+        if (euc_d2(node->dot.coord, query, min_d)) {
+            best_ind = node->dot.index;
         }
 
-        int axis = depth % dim;
-        KDNode* next;
-        KDNode* other;
-
-        if (query[axis] < node->coord[axis]) {
-            next = node->left;
-            other = node->right;
+        bool is_left = true;
+        if (query[axis] <= node->dot.coord[axis]) {
+            if (node->left != nullptr) {
+                find_nearest(node->left, query, depth + 1, min_d, best_ind);
+            }
         }
         else {
-            next = node->right;
-            other = node->left;
+            if (node->right != nullptr) {
+                find_nearest(node->right, query, depth + 1, min_d, best_ind);
+            }
+            is_left = false;
         }
-        find_nearest(next, query, depth + 1, min_d, index, dim);
 
         // Проверка, может ли в другом поддереве быть более близкая точка
-        long long tmp = query[axis] - node->coord[axis];
-        if (tmp * tmp < min_d) {
-            find_nearest(other, query, depth + 1, min_d, index, dim);
+        if ((is_left && node->right != nullptr) || (!is_left && node->left != nullptr)) {
+            long long tmp = query[axis] - node->dot.coord[axis];
+            if (tmp * tmp < min_d) {
+                if (is_left && node->right != nullptr) {
+                    find_nearest(node->right, query, depth + 1, min_d, best_ind);
+                }
+                else if (node->left != nullptr) {
+                    find_nearest(node->left, query, depth + 1, min_d, best_ind);
+                }
+            }
         }
     }
-
 public:
-    KDTree(const std::vector<std::vector<int>>& coords, int size, int dim) {
-        std::vector<std::pair<std::vector<int>, int>> points(size);
-        for (int i = 0; i < size; ++i) {
-            points[i] = {coords[i], i + 1};
+    explicit KDTree(int d) : dim(d) {}
+
+    void insert(const std::array<int, MAX_D>& coords, int index) {
+        if (root == nullptr) {
+            root = std::make_unique<KDNode>(coords, index);
+        } else {
+            recursive_insert(root, coords, index, 0);
         }
-        root = build(points, 0, 0, size, dim);
     }
 
-    int nearest(const std::vector<int>& query, int dim) {
+    int nearest(const std::array<int, MAX_D>& query) {
+        if (root == nullptr) {
+            return -1;
+        }
+
         long long min_d = LLONG_MAX;
         int index = -1;
-        find_nearest(root, query, 0, min_d, index, dim);
+        find_nearest(root, query, 0, min_d, index);
         return index;
     }
 };
+
+void build(KDTree& tree, std::array<point, MAX_N>& coords, int l, int r, int depth, int dim) {
+    if (r <= l) {
+        return;
+    }
+    if (r - l == 1) {
+        tree.insert(coords[l].coord, coords[l].index);
+        return;
+    }
+    int axis = depth % dim;
+    int mid = (l + r) / 2;
+    std::nth_element(coords.begin() + l, coords.begin() + mid, coords.begin() + r, Comparator(axis));
+    tree.insert(coords[mid].coord, coords[mid].index);
+    build(tree, coords, l, mid, depth + 1, dim);
+    build(tree, coords, mid + 1, r, depth + 1, dim);
+}
 
 int main() {
     std::ios::sync_with_stdio(false);
@@ -159,23 +149,26 @@ int main() {
 
     int n, d;
     std::cin >> n >> d;
+    KDTree tree(d);
+    std::array<point, MAX_N> coords;
 
-    std::vector<std::vector<int>> coords(n, std::vector<int>(d));
-    for (int i = 0; i < n; ++i) {
-        for (int j = 0; j < d; ++j) {
-            std::cin >> coords[i][j];
+    for (int i = 0; i < n; i++) {
+        std::array<int, MAX_D> x{};
+        for (int j = 0; j < d; j++) {
+            std::cin >> x[j];
         }
+        coords[i] = point(x, i + 1);
     }
-    KDTree tree(coords, n, d);
+
+    build(tree, coords, 0, n, 0, d);
 
     int q;
     std::cin >> q;
-
-    std::vector<int> y(d);
-    for (int i = 0; i < q; ++i) {
-        for (int j = 0; j < d; ++j) {
-            std::cin >> y[j];
+    for (int i = 0; i < q; i++) {
+        std::array<int, MAX_D> query{};
+        for (int j = 0; j < d; j++) {
+            std::cin >> query[j];
         }
-        std::cout << tree.nearest(y, d) << "\n";
+        std::cout << tree.nearest(query) << '\n';
     }
 }
